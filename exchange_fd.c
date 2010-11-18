@@ -85,11 +85,11 @@ int recv_fd(int fd, ssize_t (*userfunc)(int, const void*, size_t))
 		msg.msg_controllen = CMSG_LEN(sizeof(int));
 		if (0 > (nr = recvmsg(fd, &msg, 0)))
 		{
-			perror("recvmsg");
-			return -1;
+			//perror("recvmsg");
+			return -2;
 		} else if (0 == nr) {
-			fprintf(stderr, "Connection closed by server\n");
-			return -1;
+			//fprintf(stderr, "Connection closed by server\n");
+			return -3;
 		}
 
 		for (ptr = buf; ptr < &buf[nr];)
@@ -98,16 +98,16 @@ int recv_fd(int fd, ssize_t (*userfunc)(int, const void*, size_t))
 			{
 				if (ptr != &buf[nr-1])
 				{
-					fprintf(stderr, "message format error\n");
-					return -1;
+					//fprintf(stderr, "message format error\n");
+					return -4;
 				}
 				status = *ptr & 0xFF;
 				if (0 == status)
 				{
 					if (msg.msg_controllen != CMSG_LEN(sizeof(int)))
 					{
-						fprintf(stderr, "status is 0 but no fd\n");
-						return -1;
+						//fprintf(stderr, "status is 0 but no fd\n");
+						return -5;
 					}
 					newfd = *(int*)CMSG_DATA(cmsgptr);
 				} else {
@@ -118,7 +118,7 @@ int recv_fd(int fd, ssize_t (*userfunc)(int, const void*, size_t))
 		}
 		if (nr > 0 && (*userfunc)(STDERR_FILENO, buf, nr) != nr)
 		{
-			return -1;
+			return -6;
 		}
 		if (status >= 0)
 		{
@@ -193,6 +193,110 @@ START_TEST (test_send_fd)
 }
 END_TEST
 
+START_TEST (test_send_fd_with_sockpair)
+{
+	int sockfd[2];
+	int dummy_fd = STDERR_FILENO;
+
+	if (-1 == socketpair(AF_UNIX, SOCK_STREAM, 0, sockfd))
+	{
+		perror("socketpair");
+		fail();
+	}
+
+	fail_unless(send_fd(sockfd[0], dummy_fd) == 0);
+
+	//should fail if the other end is closed
+	close(sockfd[1]);
+	fail_unless(send_fd(sockfd[0], dummy_fd) == -2);
+}
+END_TEST
+
+START_TEST (test_fd_exchange)
+{
+	int sockfd = -1;
+	int dummy_fd = STDERR_FILENO;
+	struct sockaddr_un addr;
+	socklen_t addr_len = 0;
+	int conn_fd;
+	pid_t pid;
+
+	//send fd
+	fail_unless(send_fd(sockfd, dummy_fd) == -2);
+
+	//create server address
+	if (-1 == unlink(SOCK_NAME))
+	{
+		fail();
+	}
+	addr.sun_family = AF_UNIX;
+	strcpy(addr.sun_path, SOCK_NAME);
+	addr_len = offsetof(struct sockaddr_un, sun_path)+strlen(SOCK_NAME);
+
+	//create a child in order to connect to from the other end of the pipe
+	if (0 > (pid = fork()))
+	{
+		fail();
+	} else if (0 == pid)
+	{
+		//child
+		if (-1 == (sockfd = socket(AF_UNIX, SOCK_STREAM, 0)))
+		{
+			fail();
+		}
+		if (-1 == connect(sockfd, (struct sockaddr *)&addr, addr_len))
+		{
+			fail();
+		}
+		fail_unless(recv_fd(sockfd, write) == STDERR_FILENO);
+		return;
+	}
+	//parent
+	if (-1 == (sockfd = socket(AF_UNIX, SOCK_STREAM, 0)))
+	{
+		fail();
+	}
+	//bind socket to an address
+	if (-1 == bind(sockfd, (struct sockaddr *)&addr, addr_len))
+	{
+		perror("bind");
+		fail();
+	}
+
+	if (-1 == listen(sockfd, 3))
+	{
+		perror("listen");
+		fail();
+	}
+	//accept connections using this end
+	if (-1 == (conn_fd = accept(sockfd, (struct sockaddr *)&addr, &addr_len)))
+	{
+		fail();
+	}
+	//send the fd
+	fail_unless(send_fd(conn_fd, dummy_fd) == 0);
+}
+END_TEST
+
+START_TEST (test_fd_exchange_with_sockpair)
+{
+	int sockfd[2];
+	int dummy_fd = STDERR_FILENO;
+
+	if (-1 == socketpair(AF_UNIX, SOCK_STREAM, 0, sockfd))
+	{
+		perror("socketpair");
+		fail();
+	}
+
+	//send fd from one end
+	fail_unless(send_fd(sockfd[0], dummy_fd) == 0);
+
+	//receive fd from the other end (doesn't work)
+	fail_unless(recv_fd(sockfd[1], write) == -5);
+}
+END_TEST
+
 Suite* test_suite(void)
 {
         Suite *s = suite_create("exchange_fd");
@@ -200,6 +304,9 @@ Suite* test_suite(void)
         /* Core test case */
         TCase *tc_core = tcase_create("Core");
         tcase_add_test(tc_core, test_send_fd);
+        tcase_add_test(tc_core, test_send_fd_with_sockpair);
+        tcase_add_test(tc_core, test_fd_exchange);
+        tcase_add_test(tc_core, test_fd_exchange_with_sockpair);
         suite_add_tcase(s, tc_core);
 
         return s;
