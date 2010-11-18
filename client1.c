@@ -14,6 +14,8 @@
 #include <sys/socket.h>
 #include <string.h>
 #include <fcntl.h>
+#include <stddef.h>
+#include <sys/un.h>
 
 static struct cmsghdr *cmsgptr = NULL;
 
@@ -37,16 +39,17 @@ int recv_fd(int fd, ssize_t (*userfunc)(int, const void*, size_t))
 		msg.msg_namelen = 0;
 		if ((NULL == cmsgptr) && (NULL == (cmsgptr = malloc(CMSG_LEN(sizeof(int))))))
 		{
+			fprintf(stderr, "Error when allocating memory for control message\n");
 			return -1;
 		}
 		msg.msg_control = cmsgptr;
 		msg.msg_controllen = CMSG_LEN(sizeof(int));
 		if (0 > (nr = recvmsg(fd, &msg, 0)))
 		{
-			//perror("recvmsg");
+			perror("recvmsg");
 			return -2;
 		} else if (0 == nr) {
-			//fprintf(stderr, "Connection closed by server\n");
+			fprintf(stderr, "Connection closed by server\n");
 			return -3;
 		}
 
@@ -56,15 +59,15 @@ int recv_fd(int fd, ssize_t (*userfunc)(int, const void*, size_t))
 			{
 				if (ptr != &buf[nr-1])
 				{
-					//fprintf(stderr, "message format error\n");
+					fprintf(stderr, "message format error\n");
 					return -4;
 				}
 				status = *ptr & 0xFF;
 				if (0 == status)
 				{
-					if (msg.msg_controllen != CMSG_LEN(sizeof(int)))
+					if (msg.msg_controllen == 0)
 					{
-						//fprintf(stderr, "status is 0 but no fd\n");
+						fprintf(stderr, "status is 0 but no fd\n");
 						return -5;
 					}
 					newfd = *(int*)CMSG_DATA(cmsgptr);
@@ -76,6 +79,7 @@ int recv_fd(int fd, ssize_t (*userfunc)(int, const void*, size_t))
 		}
 		if (nr > 0 && (*userfunc)(STDERR_FILENO, buf, nr) != nr)
 		{
+			fprintf(stderr, "Error in userfunc\n");
 			return -6;
 		}
 		if (status >= 0)
@@ -85,6 +89,61 @@ int recv_fd(int fd, ssize_t (*userfunc)(int, const void*, size_t))
 	}
 }
 
+int parent_fd[2];
+int child_fd[2];
+
+void tell_wait()
+{
+	//open pipes for each communication channel
+	if ((0 > pipe(parent_fd)) || (0 > pipe(child_fd)))
+	{
+		perror("pipe");
+	}
+}
+
+void tell_parent()
+{
+	if (1 != write(child_fd[1], "c", 1))
+	{
+		perror("tell_parent");
+	}
+}
+
+void tell_child()
+{
+	if (1 != write(parent_fd[1], "p", 1))
+	{
+		perror("tell_child");
+	}
+}
+
+void wait_parent()
+{
+	char buf;
+	if (1 != read(parent_fd[0], &buf, 1))
+	{
+		perror("wait_parent");
+	}
+	if ('p' != buf)
+	{
+		perror("unknown char");
+	}
+}
+
+void wait_child()
+{
+	char buf;
+	if (1 != read(child_fd[0], &buf, 1))
+	{
+		perror("wait_child");
+	}
+	if ('c' != buf)
+	{
+		perror("unknown char");
+	}
+}
+
+#define SERVER "/tmp/my_server"
 int csopen(char *name, int oflag)
 {
 	pid_t pid;
@@ -92,21 +151,37 @@ int csopen(char *name, int oflag)
 	char buf[10];
 	struct iovec iov[3];
 	static int fd[] = {-1, -1};
+	struct sockaddr_un addr;
+	socklen_t addr_len;
+	int new_fd = -1;
 
-	if (0 > fd[0])
+	//init server address
+	addr.sun_family = AF_UNIX;
+	strcpy(addr.sun_path, SERVER);
+	addr_len = offsetof(struct sockaddr_un, sun_path)+strlen(addr.sun_path);
+
+	if (0 > new_fd)
 	{
-		if (-1 == socketpair(AF_UNIX, SOCK_STREAM, 0, fd))
-		{
-			perror("socketpair");
-			return EXIT_FAILURE;
-		}
+		tell_wait();
 		if (0 > (pid = fork()))
 		{
 			perror("fork");
 			return EXIT_FAILURE;
 		} else if (0 == pid)
 		{
-			close(fd[0]);
+			//open socket and connect to server
+			if (-1 == (fd[1] = socket(AF_UNIX, SOCK_STREAM, 0)))
+			{
+				perror("socket child");
+				return EXIT_FAILURE;
+			}
+			wait_parent();
+			if (-1 == connect(fd[1], (struct sockaddr*)&addr, addr_len))
+			{
+				perror("connect");
+				return EXIT_FAILURE;
+			}
+
 			if (fd[1] != STDIN_FILENO && dup2(fd[1], STDIN_FILENO) != STDIN_FILENO)
 			{
 				perror("dup2 on stdin");
@@ -124,7 +199,33 @@ int csopen(char *name, int oflag)
 			}
 			return EXIT_SUCCESS;
 		}
-		close(fd[1]);
+		//create a server and accept connections on it
+		if (-1 == (fd[0] = socket(AF_UNIX, SOCK_STREAM, 0)))
+		{
+			perror("socket parent");
+			return EXIT_FAILURE;
+		}
+		if (-1 == unlink(SERVER))
+		{
+			perror("unlink");
+			return EXIT_FAILURE;
+		}
+		if (-1 == bind(fd[0], (struct sockaddr*)&addr, addr_len))
+		{
+			perror("bind");
+			return EXIT_FAILURE;
+		}
+		if (-1 == listen(fd[0], 3))
+		{
+			perror("listen");
+			return EXIT_FAILURE;
+		}
+		tell_child();
+		if (-1 == (new_fd = accept(fd[0], (struct sockaddr*)&addr, &addr_len)))
+		{
+			perror("accept");
+			return EXIT_FAILURE;
+		}
 	}
 	sprintf(buf, " %d", oflag);
 	iov[0].iov_base = CL_OPEN " ";//string concatenation
@@ -134,13 +235,13 @@ int csopen(char *name, int oflag)
 	iov[2].iov_base = buf;
 	iov[2].iov_len = strlen(buf)+1;
 	len = iov[0].iov_len+iov[1].iov_len+iov[2].iov_len;
-	if (len != writev(fd[0], iov, 3))
+	if (len != writev(new_fd, iov, 3))
 	{
 		perror("writev");
 		return EXIT_FAILURE;
 	}
 
-	return recv_fd(fd[0], write);
+	return recv_fd(new_fd, write);
 }
 
 int main(int argc, char *argv[])

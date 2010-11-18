@@ -13,6 +13,9 @@
 #include <unistd.h>
 #include <sys/un.h>
 #include <stddef.h>
+#include <fcntl.h>
+#include <sys/syslog.h>
+#include <sys/wait.h>
 
 static struct cmsghdr *cmsgptr = NULL;
 
@@ -81,14 +84,15 @@ int recv_fd(int fd, ssize_t (*userfunc)(int, const void*, size_t))
 		{
 			return -1;
 		}
+		memset(cmsgptr, 0, CMSG_LEN(sizeof(int)));
 		msg.msg_control = cmsgptr;
 		msg.msg_controllen = CMSG_LEN(sizeof(int));
 		if (0 > (nr = recvmsg(fd, &msg, 0)))
 		{
-			//perror("recvmsg");
+			perror("recvmsg");
 			return -2;
 		} else if (0 == nr) {
-			//fprintf(stderr, "Connection closed by server\n");
+			fprintf(stderr, "Connection closed by server\n");
 			return -3;
 		}
 
@@ -98,15 +102,15 @@ int recv_fd(int fd, ssize_t (*userfunc)(int, const void*, size_t))
 			{
 				if (ptr != &buf[nr-1])
 				{
-					//fprintf(stderr, "message format error\n");
+					fprintf(stderr, "message format error\n");
 					return -4;
 				}
 				status = *ptr & 0xFF;
 				if (0 == status)
 				{
-					if (msg.msg_controllen != CMSG_LEN(sizeof(int)))
+					if (msg.msg_controllen == 0)
 					{
-						//fprintf(stderr, "status is 0 but no fd\n");
+						fprintf(stderr, "status is 0 but no fd\n");
 						return -5;
 					}
 					newfd = *(int*)CMSG_DATA(cmsgptr);
@@ -118,6 +122,7 @@ int recv_fd(int fd, ssize_t (*userfunc)(int, const void*, size_t))
 		}
 		if (nr > 0 && (*userfunc)(STDERR_FILENO, buf, nr) != nr)
 		{
+			fprintf(stderr, "Error using user func\n");
 			return -6;
 		}
 		if (status >= 0)
@@ -190,6 +195,7 @@ START_TEST (test_send_fd)
 	}
 	//try to send again the fd
 	fail_unless(send_fd(conn_fd, dummy_fd) == 0);
+	check_waitpid_and_exit(pid);
 }
 END_TEST
 
@@ -212,17 +218,31 @@ START_TEST (test_send_fd_with_sockpair)
 }
 END_TEST
 
+#define FILE_NAME "/home/bogdan/C++/TempPrj/opend1.c"
 START_TEST (test_fd_exchange)
 {
 	int sockfd = -1;
-	int dummy_fd = STDERR_FILENO;
+	int fd = -1;
 	struct sockaddr_un addr;
 	socklen_t addr_len = 0;
 	int conn_fd;
 	pid_t pid;
+	off_t file_off = 0;
+
+	if (-1 == (fd = open(FILE_NAME, O_RDONLY)))
+	{
+		perror("open");
+		fail();
+	}
+
+	if (-1 == lseek(fd, 11, SEEK_SET))
+	{
+		perror("lseek");
+		fail();
+	}
 
 	//send fd
-	fail_unless(send_fd(sockfd, dummy_fd) == -2);
+	fail_unless(send_fd(sockfd, fd) == -2);
 
 	//create server address
 	if (-1 == unlink(SOCK_NAME))
@@ -240,6 +260,7 @@ START_TEST (test_fd_exchange)
 	} else if (0 == pid)
 	{
 		//child
+		close(fd);
 		if (-1 == (sockfd = socket(AF_UNIX, SOCK_STREAM, 0)))
 		{
 			fail();
@@ -248,7 +269,15 @@ START_TEST (test_fd_exchange)
 		{
 			fail();
 		}
-		fail_unless(recv_fd(sockfd, write) == STDERR_FILENO);
+		fail_unless((fd = recv_fd(sockfd, write)) > 0);
+
+		if (-1 == (file_off = lseek(fd, 0, SEEK_CUR)))
+		{
+			perror("lseek");
+			fail();
+		}
+		fail_unless(11 == file_off);
+
 		return;
 	}
 	//parent
@@ -274,7 +303,8 @@ START_TEST (test_fd_exchange)
 		fail();
 	}
 	//send the fd
-	fail_unless(send_fd(conn_fd, dummy_fd) == 0);
+	fail_unless(send_fd(conn_fd, fd) == 0);
+	check_waitpid_and_exit(pid);
 }
 END_TEST
 
@@ -292,8 +322,8 @@ START_TEST (test_fd_exchange_with_sockpair)
 	//send fd from one end
 	fail_unless(send_fd(sockfd[0], dummy_fd) == 0);
 
-	//receive fd from the other end (doesn't work)
-	fail_unless(recv_fd(sockfd[1], write) == -5);
+	//receive fd from the other end
+	fail_unless(recv_fd(sockfd[1], write) > 0);
 }
 END_TEST
 

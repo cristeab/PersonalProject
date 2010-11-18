@@ -95,6 +95,7 @@ int send_fd(int fd, int fd_to_send)
 	buf[0] = 0;
 	if (2 != sendmsg(fd, &msg, 0))
 	{
+		fprintf(stderr, "error in sendmsg\n");
 		return -2;
 	}
 	return 0;
