@@ -45,6 +45,11 @@ public:
 			pList_ = pTempList;
 		}
 	}
+	/*template<class Item>
+	Iterator<Item>* CreateListIterator()
+	{
+		return new ListIterator<Item>(this);
+	}*/
 	~List()
 	{
 		delete[] pList_;
