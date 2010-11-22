@@ -92,7 +92,7 @@ public:
 	{
 		if (IsDone())
 		{
-			//throw IteratorOutOfBounds;
+			throw IteratorOutOfBounds();
 		}
 		return pList_->Get(current_);
 	}
@@ -101,22 +101,119 @@ private:
 	long current_;
 };
 
-TEST (test_case, your_test)
+template <class Item>
+class ReverseListIterator : public Iterator<Item>
 {
-	//init list
-	List<int> fixture;
-	int n = 0;
-	for (n = 0; n < 10; ++n)
+public:
+	ReverseListIterator(const List<Item> *pList) :
+		pList_(pList), current_(0)
 	{
-		fixture.Set(n, n+100);
 	}
+	virtual void First()
+	{
+		current_ = pList_->Count()-1;
+	}
+	virtual void Next()
+	{
+		--current_;
+	}
+	virtual bool IsDone() const
+	{
+		return current_ < 0;
+	}
+	virtual Item& CurrentItem() const
+	{
+		if (IsDone())
+		{
+			throw IteratorOutOfBounds();
+		}
+		return pList_->Get(current_);
+	}
+private:
+	const List<Item> *pList_;
+	long current_;
+};
 
-	//iterate through the entire list
-	ListIterator<int> it(&fixture);
-	for (it.First(), n = 0; !it.IsDone(); it.Next(), ++n)
+class IteratorTest : public ::testing::Test
+{
+protected:
+	virtual void SetUp()
 	{
-		EXPECT_EQ(it.CurrentItem(), n+100);
+		for (int n = 0; n < 10; ++n)
+		{
+			fixture_.Set(n, n+100);
+		}
 	}
+	virtual void TearDown()
+	{}
+	List<int> fixture_;
+};
+
+//this is a proxy
+template <class Item>
+class IteratorPtr
+{
+public:
+	IteratorPtr(Iterator<Item> *ipIt) :
+		pIt_(ipIt)
+	{
+	}
+	Iterator<Item>* operator->()
+	{
+		return pIt_;
+	}
+	Iterator<Item>& operator*()
+	{
+		return *pIt_;
+	}
+	~IteratorPtr()
+	{
+		delete pIt_;
+	}
+private:
+	IteratorPtr(const IteratorPtr<Item>&);
+	IteratorPtr& operator=(const IteratorPtr<Item>&);
+	Iterator<Item> *pIt_;
+};
+
+TEST_F (IteratorTest, iterators_test)
+{
+	//iterate through the entire list
+	IteratorPtr<int> pIt(new ListIterator<int>(&fixture_));
+	int n = 0;
+	for (pIt->First(), n = 0; !pIt->IsDone(); pIt->Next(), ++n)
+	{
+		EXPECT_EQ(pIt->CurrentItem(), n+100);
+	}
+	IteratorPtr<int> pIt2(new ReverseListIterator<int>(&fixture_));
+	for (pIt2->First(), n = 9; !pIt2->IsDone(); pIt2->Next(), --n)
+	{
+		EXPECT_EQ(pIt2->CurrentItem(), n+100);
+	}
+}
+
+TEST_F (IteratorTest, throw_exception)
+{
+	IteratorPtr<int> pIt(new ListIterator<int>(&fixture_));
+	pIt->First();
+	for (int n = 0; n < 11; ++n)
+	{
+		pIt->Next();
+	}
+	try
+	{
+		pIt->CurrentItem();
+	}
+	catch (IteratorOutOfBounds e)
+	{
+		return;
+	}
+	catch (...)
+	{
+		//must fail
+		ASSERT_EQ(0, 1);
+	}
+	ASSERT_EQ(0, 1);
 }
 
 int main(int argc, char *argv[])
