@@ -1,6 +1,8 @@
 /*
  * IteratorPattern.cpp
  *
+ * Implements both external and internal iterators
+ *
  *  Created on: Nov 22, 2010
  *      Author: bogdan
  */
@@ -176,6 +178,56 @@ private:
 	Iterator<Item> *pIt_;
 };
 
+//internal iterator
+template<class Item>
+class ListTraverser
+{
+public:
+	ListTraverser(Iterator<Item> *ipIterator) :
+		pIt_(ipIterator)
+	{
+	}
+	bool Traverse()
+	{
+		bool result = false;
+		for (pIt_->First(); !pIt_->IsDone(); pIt_->Next())
+		{
+			result = ProcessItem(pIt_->CurrentItem());
+			if (false == result)
+			{
+				break;
+			}
+		}
+		return result;
+	}
+protected:
+	virtual bool ProcessItem(const Item &item) = 0;
+private:
+	Iterator<Item> *pIt_;
+};
+
+template<class Item>
+class GetNbItems : public ListTraverser<Item>
+{
+public:
+	GetNbItems(Iterator<Item> *ipIterator) :
+		ListTraverser<Item>(ipIterator), count_(0)
+	{
+	}
+	long GetCount()
+	{
+		return count_;
+	}
+protected:
+	virtual bool ProcessItem(const Item & item)
+	{
+		++count_;
+		return true;
+	}
+private:
+	long count_;
+};
+
 TEST_F (IteratorTest, iterators_test)
 {
 	//iterate through the entire list
@@ -214,6 +266,14 @@ TEST_F (IteratorTest, throw_exception)
 		ASSERT_EQ(0, 1);
 	}
 	ASSERT_EQ(0, 1);
+}
+
+TEST_F (IteratorTest, test_internal_iterator)
+{
+	IteratorPtr<int> pIt(new ListIterator<int>(&fixture_));
+	GetNbItems<int> nbItems(pIt.operator->());
+	EXPECT_EQ(nbItems.Traverse(), true);
+	EXPECT_EQ(nbItems.GetCount(), 10);
 }
 
 int main(int argc, char *argv[])
