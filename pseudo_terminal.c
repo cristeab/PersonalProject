@@ -13,6 +13,10 @@
 #include <string.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <termios.h>
+#include <sys/ioctl.h>
+#include <errno.h>
+#include <sys/syslog.h>
 
 int ptym_open(char *pts_name, int pts_namesz)
 {
@@ -57,10 +61,84 @@ int ptys_open(char *pts_name)
 	return fds;
 }
 
+pid_t pty_fork(int *ptrfdm, char *slave_name, int slave_namesz,
+		const struct termios *slave_termios, const struct winsize *slave_winsize)
+{
+	int fdm, fds;
+	pid_t pid;
+	char pts_name[20];
+
+	if (0 > (fdm = ptym_open(pts_name, sizeof(pts_name))))
+	{
+		fprintf(stderr, "ptym_open");
+		return -1;
+	}
+	if (NULL != slave_name)
+	{
+		strncpy(slave_name, pts_name, slave_namesz);
+		slave_name[slave_namesz-1] = '\0';
+	}
+
+	if (0 > (pid = fork()))
+	{
+		return -1;
+	} else if (pid == 0)
+	{
+		if (0 > setsid())
+		{
+			perror("setsid\n");
+			return -1;
+		}
+		if (0 > (fds = ptys_open(pts_name)))
+		{
+			fprintf(stderr, "pts_open\n");;
+			return -1;
+		}
+		close(fdm);
+		if (NULL != slave_termios)
+		{
+			if (0 > tcsetattr(fds, TCSANOW, slave_termios))
+			{
+				perror("tcsetattr");
+				return -1;
+			}
+		}
+		if (NULL != slave_winsize)
+		{
+			if (0 > ioctl(fds, TIOCSWINSZ, slave_winsize))
+			{
+				perror("ioctl");
+				return -1;
+			}
+		}
+		if (STDIN_FILENO != dup2(fds, STDIN_FILENO))
+		{
+			perror("dup2 - stdin");
+			return -1;
+		}
+		if (STDOUT_FILENO != dup2(fds, STDOUT_FILENO))
+		{
+			perror("dup2 - stdout");
+			return -1;
+		}
+		if (STDERR_FILENO != dup2(fds, STDERR_FILENO))
+		{
+			perror("dup2 - stderr");
+			return -1;
+		}
+		return 0;
+	} else {
+		*ptrfdm = fdm;
+		return pid;
+	}
+}
+
 #define BUF_LEN 128
 START_TEST (test_template)
 {
 	char buf[BUF_LEN];
+	pid_t pid;
+	int fdm = -1;
 
 	//open master pts
 	fail_unless(ptym_open(buf, BUF_LEN)>0);
@@ -68,6 +146,21 @@ START_TEST (test_template)
 
 	//open slave pts
 	fail_unless(ptys_open(buf) > 0);
+
+	//for a new process with a pts as controlling terminal
+	pid = pty_fork(&fdm, buf, BUF_LEN, NULL, NULL);
+	fail_if(pid < 0);
+	if (0 == pid)
+	{
+		//syslog(LOG_INFO, "child");
+		fail_unless(0 == isatty(fdm));
+		fail_unless(EBADF == errno);
+	} else
+	{
+		//syslog(LOG_INFO, "parent");
+		fail_unless(1 == isatty(fdm));
+	}
+	check_waitpid_and_exit(pid);
 }
 END_TEST
 
