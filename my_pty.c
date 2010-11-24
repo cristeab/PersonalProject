@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <string.h>
+#include <sys/types.h>
 
 int ptym_open(char *pts_name, int pts_namesz)
 {
@@ -135,6 +136,7 @@ pid_t pty_fork(int *ptrfdm, char *slave_name, int slave_namesz,
 static void set_noecho(int);
 //void do_driver(char*);
 void loop(int, int);
+void loop_one_process(int, int);
 
 int main(int argc, char *argv[])
 {
@@ -244,7 +246,8 @@ int main(int argc, char *argv[])
 		//do_driver(driver);
 	}
 
-	loop(fdm, ignoreeof);
+	//loop(fdm, ignoreeof);
+	loop_one_process(fdm, ignoreeof);
 
 	return EXIT_SUCCESS;
 }
@@ -344,4 +347,56 @@ void loop(int ptym, int ignoreeof)
 	{
 		kill(child, SIGTERM);
 	}
+}
+
+void loop_one_process(int ptym, int ignoreeof)
+{
+	int nread;
+	char buf[BUFFSIZE];
+	fd_set readfds;
+	fd_set readfds_current;
+
+	FD_ZERO(&readfds);
+	FD_SET(STDIN_FILENO, &readfds);
+	FD_SET(ptym, &readfds);
+
+	while (1)
+	{
+		readfds_current = readfds;
+		if (0 > select(ptym + 1, &readfds_current, NULL, NULL, NULL))
+		{
+			perror("select");
+			break;
+		}
+		if (FD_ISSET(STDIN_FILENO, &readfds_current))
+		{
+			if (0 > (nread = read(STDIN_FILENO, buf, BUFFSIZE)))
+			{
+				perror("read");
+				break;
+			}
+			else if (0 == nread)
+			{
+				break;
+			}
+			if (nread != write(ptym, buf,nread))
+			{
+				perror("write");
+				break;
+			}
+		}
+		if (FD_ISSET(ptym, &readfds_current))
+		{
+			if (0 >= (nread = read(ptym, buf, BUFFSIZE)))
+			{
+				break;
+			}
+			if (nread != write(STDOUT_FILENO, buf, nread))
+			{
+				perror("write");
+				break;
+			}
+		}
+	}
+	exit(EXIT_FAILURE);
 }
