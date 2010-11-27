@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <iostream>
 #include <vector>
+#include <tr1/memory>
 
 enum Direction {North, South, East, West};
 
@@ -19,6 +20,7 @@ public:
 	{
 	}
 };
+typedef std::tr1::shared_ptr<MapSite> Sp_MapSite;
 
 class Room : public MapSite
 {
@@ -26,23 +28,14 @@ public:
 	Room(int roomNo) :
 		roomNumber_(roomNo)
 	{
-		for (int n = 0; n < 4; ++n)
-		{
-			sides_[n] = NULL;
-		}
 	}
-	MapSite* GetSide(Direction dir) const
+	Sp_MapSite GetSide(Direction dir) const
 	{
-		return sides_[dir];
+		return Sp_MapSite(spSides_[dir]);
 	}
-	bool SetSide(Direction dir, MapSite *ipSide)
+	void SetSide(Direction dir, const Sp_MapSite &ispSide)
 	{
-		if (NULL == ipSide)
-		{
-			return false;
-		}
-		sides_[dir] = ipSide;
-		return true;
+		spSides_[dir] = ispSide;
 	}
 	int GetRoomNumber() const
 	{
@@ -53,10 +46,11 @@ public:
 		//std::cout << "Entering room no " << roomNumber_ << std::endl;
 		return true;
 	}
-private:
+protected:
 	int roomNumber_;
-	MapSite *sides_[4];
+	Sp_MapSite spSides_[4];
 };
+typedef std::tr1::shared_ptr<Room> Sp_Room;
 
 class Wall : public MapSite
 {
@@ -70,26 +64,27 @@ public:
 		return false;
 	}
 };
+typedef std::tr1::shared_ptr<Wall> Sp_Wall;
 
 class Door : public MapSite
 {
 public:
-	Door(Room *ipRoom1 = NULL, Room *ipRoom2 = NULL) :
-		isOpen_(false)
+	Door(const Sp_Room &ispRoom1, const Sp_Room &ispRoom2, bool isOpen = false) :
+		isOpen_(isOpen)
 	{
-		pRoom_[0] = ipRoom1;
-		pRoom_[1] = ipRoom2;
+		spRoom_[0] = ispRoom1;
+		spRoom_[1] = ispRoom2;
 	}
-	Room* OtherSideFrom(Room *ipRoom)
+	Sp_Room OtherSideFrom(const Sp_Room &ispRoom)
 	{
-		if (ipRoom == pRoom_[0])
+		if (ispRoom == spRoom_[0])
 		{
-			return pRoom_[1];
-		} else if (ipRoom == pRoom_[1])
+			return spRoom_[1];
+		} else if (ispRoom == spRoom_[1])
 		{
-			return pRoom_[0];
+			return spRoom_[0];
 		}
-		return NULL;
+		return Sp_Room();
 	}
 	void SetOpen()
 	{
@@ -101,8 +96,9 @@ public:
 	}
 private:
 	bool isOpen_;
-	Room *pRoom_[2];
+	Sp_Room spRoom_[2];
 };
+typedef std::tr1::shared_ptr<Door> Sp_Door;
 
 class Maze
 {
@@ -110,72 +106,113 @@ public:
 	Maze()
 	{
 	}
-	void AddRoom(Room *ipRoom)
+	void AddRoom(Sp_Room ispRoom)
 	{
-		rooms_.push_back(ipRoom);
+		spRooms_.push_back(ispRoom);
 	}
-	Room* RoomNo(int roomNo) const
+	Sp_Room RoomNo(int roomNo) const
 	{
-		for (unsigned int n = 0; n < rooms_.size(); ++n)
+		for (unsigned int n = 0; n < spRooms_.size(); ++n)
 		{
-			if (rooms_[n]->GetRoomNumber() == roomNo)
+			if (spRooms_[n]->GetRoomNumber() == roomNo)
 			{
-				return rooms_[n];
+				return spRooms_[n];
 			}
 		}
-		return NULL;
+		return Sp_Room();
 	}
 private:
-	std::vector<Room*> rooms_;
+	std::vector<Sp_Room> spRooms_;
 };
+typedef std::tr1::shared_ptr<Maze> Sp_Maze;
 
-TEST (test_maze, room_test)
+class BombedWall : public Wall
 {
-	Room *pRoom = new Room(0);
-	MapSite *pWall = new Wall();
-	EXPECT_EQ(pRoom->SetSide(North, pWall), true);
-	EXPECT_EQ(pRoom->GetSide(North), pWall);
-	EXPECT_EQ(pRoom->GetRoomNumber(), 0);
-	EXPECT_EQ(pRoom->Enter(), true);
-	delete pRoom;
-	delete pWall;
-}
+public:
+	BombedWall() :
+		isBombed_(false)
+	{
+	}
+	void BombWall()
+	{
+		isBombed_ = true;
+	}
+	virtual bool Enter()
+	{
+		//std::cout << "Cannot enter into a wall" << std::endl;
+		return isBombed_;
+	}
+private:
+	bool isBombed_;
+};
+typedef std::tr1::shared_ptr<BombedWall> Sp_BombedWall;
+
+class RoomWithBomb : public Room
+{
+public:
+	RoomWithBomb(int roomNo) :
+		Room(roomNo), hasBomb_(true)
+	{
+	}
+	void RemoveBomb()
+	{
+		hasBomb_ = false;
+	}
+	virtual bool Enter()
+	{
+		for (int n = 0; n < 4; ++n)
+		{
+			if (BombedWall *pBombedWall = dynamic_cast<BombedWall*>(spSides_[n].get()))
+			{
+				pBombedWall->BombWall();
+			} else if (Door* pDoor = dynamic_cast<Door*>(spSides_[n].get()))
+			{
+				pDoor->SetOpen();
+			} else
+			{
+				//std::cerr << "Cannot cast the MapSites" << std::endl;
+				return false;
+			}
+		}
+		return true;
+	}
+private:
+	bool hasBomb_;
+};
+typedef std::tr1::shared_ptr<RoomWithBomb> Sp_RoomWithBomb;
 
 TEST (test_maze, wall_test)
 {
-	Wall *pWall = new Wall();
-	EXPECT_EQ(pWall->Enter(), false);
+	Sp_Wall spWall(new Wall());
+	EXPECT_EQ(spWall->Enter(), false);
 }
 
 TEST (test_maze, door_test)
 {
-	Room *pRoom0 = new Room(0);
-	Room *pRoom1 = new Room(1);
-	Door *pDoor = new Door(pRoom0, pRoom1);
-	EXPECT_EQ(pDoor->Enter(), false);
-	EXPECT_EQ(pDoor->OtherSideFrom(pRoom0), pRoom1);
-	EXPECT_EQ(pDoor->OtherSideFrom(pRoom1), pRoom0);
-	Room *pNullRoom = NULL;
-	EXPECT_EQ(pDoor->OtherSideFrom(NULL), pNullRoom);
-	pDoor->SetOpen();
-	EXPECT_EQ(pDoor->Enter(), true);
-	delete pRoom0;
-	delete pRoom1;
-	delete pDoor;
+	Sp_Room spRoom0(new Room(0));
+	Sp_Room spRoom1(new Room(1));
+	Sp_Door spDoor(new Door(spRoom0, spRoom1));
+	EXPECT_EQ(spDoor->Enter(), false);
+	EXPECT_EQ(spDoor->OtherSideFrom(spRoom0), spRoom1);
+	EXPECT_EQ(spDoor->OtherSideFrom(spRoom1), spRoom0);
+	Sp_Room spUnusedRoom;
+	EXPECT_TRUE(spDoor->OtherSideFrom(spUnusedRoom).get() == NULL);
+	spDoor->SetOpen();
+	EXPECT_EQ(spDoor->Enter(), true);
 }
 
 TEST (test_maze, maze_test)
 {
 	Maze maze;
-	Room room0(0);
-	Room room1(1);
-	Room room2(2);
-	maze.AddRoom(&room0);
-	maze.AddRoom(&room1);
-	maze.AddRoom(&room2);
-	EXPECT_EQ(maze.RoomNo(0), &room0);
-	EXPECT_EQ(maze.RoomNo(1), &room1);
-	EXPECT_EQ(maze.RoomNo(2), &room2);
+	Sp_Room spRoom0(new Room(0));
+	Sp_Room spRoom1(new Room(1));
+	Sp_Room spRoom2(new Room(2));
+	maze.AddRoom(spRoom0);
+	maze.AddRoom(spRoom1);
+	maze.AddRoom(spRoom2);
+	EXPECT_EQ(maze.RoomNo(0), spRoom0);
+	EXPECT_EQ(maze.RoomNo(1), spRoom1);
+	EXPECT_EQ(maze.RoomNo(2), spRoom2);
 }
 
 int main(int argc, char *argv[])
