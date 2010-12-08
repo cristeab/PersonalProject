@@ -38,6 +38,8 @@ int main(int argc, char *argv[])
 	int policy = 0;
 	int nb_seq = 1;
 	int n = 0;
+	double etime = 0.0;
+	long int file_size = 0;
 
 	if (-1 == (fd = open(SRC_FILE, O_RDONLY)))
 	{
@@ -161,9 +163,9 @@ int main(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 	timersub(&tv_stop, &tv_start, &tv_res);
-	printf("Written %ld MB in \n", file_stat.st_size/(1<<20));
-
-	printf("Elapsed time: %ld s and %ld ms\n", (long)tv_res.tv_sec/nb_seq, (long)tv_res.tv_usec/(1000*nb_seq));
+	file_size = file_stat.st_size/(1<<20);
+	etime = (double)tv_res.tv_sec + (double)tv_res.tv_usec/1000000;
+	printf("Written %ld MB in %.2f s = %0.2f MB/s\n", file_size, etime, (double)file_size/etime);
 
 	close(fd);
 	return EXIT_SUCCESS;

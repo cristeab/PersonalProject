@@ -20,7 +20,7 @@
 #define SIZE 256
 
 const char text[] = "Hello RT POSIX World";
-char msg_recved = 0;
+volatile char msg_recved = 0;
 
 void thread_starter(union sigval siginfo)
 {
@@ -92,10 +92,7 @@ START_TEST (test_template)
 	}
 	//parent receives the message: a thread is called when a message is to be received
 
-	while(0 == msg_recved)//wait for the thread to finish
-	{
-		sleep(1);
-	}
+	while(0 == msg_recved);//wait for the thread to finish
 
 	if (-1 == mq_close(ds))
 	{

@@ -90,6 +90,11 @@ DBHANDLE db_open(const char *pathname, int oflag, ...)
 	char asciiptr[PTR_SZ+1], hash[(NHASH_DEF+1)*PTR_SZ+2];
 	struct stat statbuf;
 
+	if (NULL == pathname)
+	{
+		return NULL;
+	}
+
 	len = strlen(pathname);
 	if (NULL == (db = _db_alloc(len)))
 	{
@@ -121,6 +126,9 @@ DBHANDLE db_open(const char *pathname, int oflag, ...)
 	if (db->idxfd < 0 || db->datfd < 0)
 	{
 		_db_free(db);
+		fprintf(stderr, "%s : negative file descriptor(s): idxfd = %d, datfd = %d\n",
+				__func__, db->idxfd, db->datfd);
+		fprintf(stderr, "%s : Last error message was: %s\n", __func__, strerror(errno));
 		return NULL;
 	}
 
@@ -166,7 +174,7 @@ static DB* _db_alloc(int namelen)
 {
 	DB *db;
 
-	if (NULL == calloc(1, sizeof(DB)))
+	if (NULL == (db = calloc(1, sizeof(DB))))
 	{
 		fprintf(stderr, "%s : calloc error\n", __func__);
 		return NULL;
@@ -197,6 +205,10 @@ void db_close(DBHANDLE h)
 
 static void _db_free(DB *db)
 {
+	if (NULL == db)
+	{
+		return;
+	}
 	if (0 <= db->idxfd)
 	{
 		close(db->idxfd);
@@ -218,6 +230,7 @@ static void _db_free(DB *db)
 		free(db->name);
 	}
 	free(db);
+	db = NULL;
 }
 
 char* db_fetch(DBHANDLE h, const char *key)
@@ -295,15 +308,23 @@ static DBHASH _db_hash(DB *db, const char *key)
 static off_t _db_readptr(DB *db, off_t offset)
 {
 	char asciiptr[PTR_SZ+1];
+	int readnb = 0;
 
 	if (-1 == lseek(db->idxfd, offset, SEEK_SET))
 	{
 		fprintf(stderr, "%s : lseek error\n", __func__);
 		return -1;
 	}
-	if (PTR_SZ != read(db->idxfd, asciiptr, PTR_SZ))
+	errno = 0;
+	readnb = read(db->idxfd, asciiptr, PTR_SZ);
+	if (0 == readnb)
 	{
-		fprintf(stderr, "%s : read error\n", __func__);
+		return 0;
+	}
+	if (PTR_SZ != readnb)
+	{
+		fprintf(stderr, "%s : %s\n", __func__, strerror(errno));
+		fprintf(stderr, "%s : number of bytes read %d\n", __func__, readnb);
 		return -1;
 	}
 	asciiptr[PTR_SZ] = 0;
@@ -373,7 +394,7 @@ static off_t _db_readidx(DB *db, off_t offset)
 
 	if (NULL != strchr(ptr2, SEP))
 	{
-		fprintf(stderr, "%s : too many separators\n");
+		fprintf(stderr, "%s : too many separators\n", __func__);
 		return -1;
 	}
 
@@ -496,7 +517,7 @@ static void _db_writedat(DB *db, const char *data, off_t offset, int whence)
 	iov[1].iov_len = 1;
 	if (db->datlen != writev(db->datfd, iov, 2))
 	{
-		fprintf(stderr, "%s : writev error\n");
+		fprintf(stderr, "%s : writev error\n", __func__);
 		return;
 	}
 	if (SEEK_END == whence)
@@ -588,7 +609,7 @@ static void _db_writeptr(DB *db, off_t offset, off_t ptrval)
 	}
 	if (PTR_SZ != write(db->idxfd, asciiptr, PTR_SZ))
 	{
-		fprintf(stderr, "%s : write error\n");
+		fprintf(stderr, "%s : write error\n", __func__);
 	}
 }
 
@@ -601,6 +622,7 @@ int db_store(DBHANDLE h, const char *key, const char *data, int flag)
 	if (DB_INSERT != flag && DB_REPLACE != flag && DB_STORE != flag)
 	{
 		errno = EINVAL;
+		fprintf(stderr, "%s : unknown flag\n", __func__);
 		return -1;
 	}
 	keylen = strlen(key);
@@ -618,6 +640,7 @@ int db_store(DBHANDLE h, const char *key, const char *data, int flag)
 			rc = -1;
 			++db->cnt_storerr;
 			errno = ENOENT;
+			fprintf(stderr, "%s : no entity\n", __func__);
 			goto doreturn;
 		}
 		ptrval = _db_readptr(db, db->chainoff);
@@ -701,7 +724,7 @@ static int _db_findfree(DB *db, int keylen, int datlen)
 	}
 	if (0 > un_lock(db->idxfd, FREE_OFF, SEEK_SET, 1))
 	{
-		fprintf(stderr, "%s : un_lock error\n");
+		fprintf(stderr, "%s : un_lock error\n", __func__);
 		return -1;
 	}
 	return rc;
