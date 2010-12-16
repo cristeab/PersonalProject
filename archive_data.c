@@ -41,6 +41,12 @@ int main(int argc, char *argv[])
 	double etime = 0.0;
 	long int file_size = 0;
 
+	if (-1 == mlockall(MCL_CURRENT | MCL_FUTURE))
+	{
+		perror("mlockall");
+		return EXIT_FAILURE;
+	}
+
 	if (-1 == (fd = open(SRC_FILE, O_RDONLY)))
 	{
 		perror("open");
@@ -167,6 +173,17 @@ int main(int argc, char *argv[])
 	etime = (double)tv_res.tv_sec + (double)tv_res.tv_usec/1000000;
 	printf("Written %ld MB in %.2f s = %0.2f MB/s\n", file_size, etime, (double)file_size/etime);
 
-	close(fd);
+	if (-1 == close(fd))
+	{
+		perror("close");
+		return EXIT_FAILURE;
+	}
+
+	if (-1 == munlockall())
+	{
+		perror("munlockall");
+		return EXIT_FAILURE;
+	}
+
 	return EXIT_SUCCESS;
 }

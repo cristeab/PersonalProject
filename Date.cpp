@@ -2,8 +2,13 @@
 #include <sstream>
 #include <ctime>
 #include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <error.h>
 
-typedef std::pair<unsigned int, std::string> NoStrPair;
+long Date::baseYear_ = 1000;
+std::string Date::monthName_[12];
+std::string Date::weekDay_[7];
 
 void Date::init()
 {
@@ -32,12 +37,12 @@ void Date::init()
 Date::Date(unsigned int d, unsigned int m, unsigned int y)
 {
 	init();
-	daysSinceBaseDate_ = dmy2dsbd(d, m, y);
+	daysSinceBaseDate_ = dmy2dsbd(d-1, m, y);
 }
 
-int dmy2dsbd(unsigned int d, unsigned int m, unsigned int y)
+int Date::dmy2dsbd(unsigned int d, unsigned int m, unsigned int y)
 {
-	if (d < 1 || d > monthDays(m, y) || m < 1 || m > 12 || y < baseYear_)
+	if (d < 1 || d > monthDays(m, y) || m < 1 || m > 12 || (y < baseYear_))
 	{
 		return 0;
 	}
@@ -59,7 +64,7 @@ int dmy2dsbd(unsigned int d, unsigned int m, unsigned int y)
 std::string Date::toString(bool brief)
 {
 	unsigned int d, m, y;
-	getMDY(d, m, y);
+	getDMY(d, m, y);
 	std::stringstream out;
 	if (brief)
 	{
@@ -74,26 +79,29 @@ std::string Date::toString(bool brief)
 void Date::getDMY(unsigned int &d, unsigned int &m, unsigned int &y)
 {
 	y = baseYear_-1;
-	unsigned int tmp = daysSinceBaseDate_;
-	while((tmp -= daysYear(++y)) >= 0);
-	tmp += daysYear(++y);
+	long tmp = daysSinceBaseDate_;
+	while((tmp -= yearDays(++y)) >= 0);
+	tmp += yearDays(y);
 	m = 0;
-	while ((tmp -= daysMonth(++m)) >= 0);
-	d = tmp+daysMonth(m);
+	while ((tmp -= monthDays(++m, y)) >= 0);
+	d = tmp+monthDays(m, y)+1;
 }
 
 int Date::setToToday()
 {
 	time_t rawtime;
-	tm *timeinfo;
+	tm *timeinfo = NULL;
 
-	time(&rawtime);
+	if ((time_t)-1 == time(&rawtime))
+	{
+		return EXIT_FAILURE;
+	}
 	if (NULL == (timeinfo = localtime(&rawtime)))
 	{
 		return EXIT_FAILURE;
 	}
 
-	daysSinceBaseDate_ = dmy2dsbd(timeinfo.tm_mday, timeinfo.tm_mon, timeinfo.tm_year);
+	daysSinceBaseDate_ = dmy2dsbd(timeinfo->tm_mday, timeinfo->tm_mon+1, 1900+timeinfo->tm_year);
 	return EXIT_SUCCESS;
 }
 
@@ -101,10 +109,20 @@ std::string Date::getWeekDay()
 {
 	unsigned int d, m, y;
 	getDMY(d, m, y);
-	return weekDay_[(d-1)%7];
+
+	//algorithm for calculating the day of the week
+	unsigned int century = 2*(3-(y/100)%4);
+	unsigned int year = y%100;
+	year += year/4;
+	static const unsigned int month_table_not_leap[] = {0, 3 ,3 , 6, 1, 4, 6, 2, 5, 0, 3, 5};
+	static const unsigned int month_table_leap[] = {6, 2 ,3 , 6, 1, 4, 6, 2, 5, 0, 3, 5};
+	unsigned int month = leapYear(y)?month_table_leap[m-1]:month_table_not_leap[m-1];
+	unsigned int day = d+century+year+month;
+
+	return weekDay_[(day+5)%7];
 }
 
-static bool Date::leapYear(unsigned int year)
+bool Date::leapYear(unsigned int year)
 {
 	bool isLeap = false;
 	if (0 == year%400)
@@ -114,10 +132,10 @@ static bool Date::leapYear(unsigned int year)
 	{
 		isLeap = true;
 	}
-	return isleap;
+	return isLeap;
 }
 
-static std::string Date::monthName(unsigned int month)
+std::string Date::monthName(unsigned int month)
 {
 	if (month < 1 || month > 12)
 	{
@@ -126,12 +144,12 @@ static std::string Date::monthName(unsigned int month)
 	return monthName_[month-1];
 }
 
-static unsigned int Date::yearDays(unsigned int year)
+unsigned int Date::yearDays(unsigned int year)
 {
 	return leapYear(year)?DAYS_LEAP_YEAR:DAYS_NOT_LEAP_YEAR;
 }
 
-static unsigned int Date::monthDays(unsigned int month, unsigned int year)
+unsigned int Date::monthDays(unsigned int month, unsigned int year)
 {
 	if (month < 1 || month > 12)
 	{
