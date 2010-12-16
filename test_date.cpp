@@ -94,7 +94,10 @@ TEST (date_test_case, constructors_test)
 	EXPECT_STREQ(date2.toString().c_str(), "19/11/1977");
 
 	date2.setToToday();
-	EXPECT_STREQ(date2.toString().c_str(), "16/12/2010");
+	EXPECT_STREQ(date2.toString().c_str(), "16/12/2010");//TODO this should be set to the current day
+
+	Date date3(1, 1, 1900);
+	EXPECT_STREQ(date3.getWeekDay().c_str(), "Monday");
 }
 
 int main(int argc, char *argv[])
