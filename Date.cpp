@@ -37,7 +37,7 @@ void Date::init()
 Date::Date(unsigned int d, unsigned int m, unsigned int y)
 {
 	init();
-	daysSinceBaseDate_ = dmy2dsbd(d-1, m, y);
+	daysSinceBaseDate_ = dmy2dsbd(d, m, y);
 }
 
 int Date::dmy2dsbd(unsigned int d, unsigned int m, unsigned int y)
@@ -57,7 +57,7 @@ int Date::dmy2dsbd(unsigned int d, unsigned int m, unsigned int y)
 	{
 		daysSinceBaseDate += monthDays(n, y);
 	}
-	daysSinceBaseDate += d;
+	daysSinceBaseDate += d-1;
 	return daysSinceBaseDate;
 }
 
@@ -119,7 +119,7 @@ std::string Date::getWeekDay()
 	unsigned int month = leapYear(y)?month_table_leap[m-1]:month_table_not_leap[m-1];
 	unsigned int day = d+century+year+month;
 
-	return weekDay_[(day+5)%7];
+	return weekDay_[(day+6)%7];
 }
 
 bool Date::leapYear(unsigned int year)

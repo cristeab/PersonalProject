@@ -75,12 +75,12 @@ TEST (date_test_case, current_date_methods_test)
 
 	//convert current day to expected format
 	std::stringstream out;
-	out << timeinfo->tm_mday+10 << '/' << timeinfo->tm_mon+1 << '/' << timeinfo->tm_year+1900;
+	out << timeinfo->tm_mday+9 << '/' << timeinfo->tm_mon+1 << '/' << timeinfo->tm_year+1900;
 
 	EXPECT_STREQ(date.toString(false).c_str(), out.str().c_str());
 
 	std::stringstream out2;
-	out2 << timeinfo->tm_mday+10 << '/' << timeinfo->tm_mon+1;
+	out2 << timeinfo->tm_mday+9 << '/' << timeinfo->tm_mon+1;
 	EXPECT_STREQ(date.toString(true).c_str(), out2.str().c_str());
 }
 
@@ -92,6 +92,9 @@ TEST (date_test_case, constructors_test)
 
 	Date date2(19, 11, 1977);
 	EXPECT_STREQ(date2.toString().c_str(), "19/11/1977");
+
+	date2.setToToday();
+	EXPECT_STREQ(date2.toString().c_str(), "16/12/2010");
 }
 
 int main(int argc, char *argv[])
