@@ -29,7 +29,7 @@ public:
 	}
 	virtual void HandleHelp()
 	{
-		if (NULL != successor_)
+		if (NULL != successor_)//forward if possible, concrete handler should decide if they handle the request
 		{
 			successor_->HandleHelp();
 		} else
